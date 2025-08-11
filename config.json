@@ -1,0 +1,17 @@
+{
+    "ear_threshold": 0.23,
+    "mar_threshold": 1.0532,
+    "consecutive_frames": {
+        "blink": 2,
+        "drowsiness": 45,
+        "yawn": 20
+    },
+    "yawn_threshold": 3,
+    "high_blink_rate_threshold": 35,
+    "sound_path": "alert.wav",
+    "landmark_indices": {
+        "left_eye": [362, 385, 387, 263, 373, 380],
+        "right_eye": [33, 160, 158, 133, 153, 144],
+        "mouth": [61, 291, 0, 17, 37, 267, 39, 269]
+    }
+}
