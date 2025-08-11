@@ -51,6 +51,6 @@ This project is a real-time fatigue monitoring system developed in Python. It ut
 
 2.  **Run the Main Detector:**
     ```
-    python main.py
+    python fatigue_detection.py
     ```
     The application will start. Press 'q' to quit.
