@@ -28,7 +28,7 @@ This project is a real-time fatigue monitoring system developed in Python. It ut
 
 1.  **Clone the repository:**
     ```
-    git clone https://github.com/M-Rishi-Krishnan/Fatigue-Detector.git
+    git clone https://github.com/M-Rishi-krishnan/Fatigue-Detector.git
     cd Fatigue-Detector
     ```
 
