@@ -1,17 +1,15 @@
 {
-    "ear_threshold": 0.23,
-    "mar_threshold": 1.0532,
-    "consecutive_frames": {
-        "blink": 2,
-        "drowsiness": 45,
-        "yawn": 20
-    },
-    "yawn_threshold": 3,
-    "high_blink_rate_threshold": 35,
-    "sound_path": "alert.wav",
-    "landmark_indices": {
-        "left_eye": [362, 385, 387, 263, 373, 380],
-        "right_eye": [33, 160, 158, 133, 153, 144],
-        "mouth": [61, 291, 0, 17, 37, 267, 39, 269]
-    }
+  "ear_threshold": 0.25,
+  "mar_threshold": 0.5,
+  "perclos_threshold": 0.4,
+  "head_pitch_threshold": 20,
+  "sound_path": "alert.wav",
+  "consecutive_frames": {
+    "blink": 1
+  },
+  "landmark_indices": {
+    "left_eye": [362, 382, 381, 380, 373, 374, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398],
+    "right_eye": [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246],
+    "mouth": [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 0, 270, 269, 267, 409, 291]
+  }
 }

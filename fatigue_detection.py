@@ -1,149 +1,123 @@
+# real_time_predictor.py
 import cv2
 import mediapipe as mp
 import numpy as np
-import time
-import os
+import torch
 import json
-import pygame
+from collections import deque
 
-class FatigueDetector:
+# --- Copy the necessary classes here ---
+
+# 1. Copy the LSTMModel class definition from train_lstm.py
+class LSTMModel(torch.nn.Module):
+    def __init__(self, input_dim=5, hidden_dim=64, num_layers=2, output_dim=2):
+        super(LSTMModel, self).__init__()
+        self.lstm = torch.nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
+        self.fc = torch.nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        _, (hn, _) = self.lstm(x)
+        out = self.fc(hn[-1])
+        return out
+
+# 2. Copy the feature extraction part of the FatigueDetectorWithPosePER class
+#    (We only need the methods to calculate features, not the rule-based logic)
+class FeatureExtractor:
     def __init__(self, config_path="config.json"):
         with open(config_path) as f:
             self.config = json.load(f)
-
-        pygame.mixer.init()
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-
-        self.alert_sound = None
-        if os.path.exists(self.config['sound_path']):
-            self.alert_sound = pygame.mixer.Sound(self.config['sound_path'])
-
-        self.counters = {
-            'eye_closed_frames': 0,
-            'yawn_frames': 0,
-            'blink_counter': 0,
-            'blinks_in_current_minute': 0,
-            'yawn_counter': 0
-        }
-        self.yawn_alert_sound_played = False
-        self.start_time = time.time()
         self.landmark_indices = self.config['landmark_indices']
 
-    def _calculate_aspect_ratio(self, landmarks, indices, frame_shape, is_mar=False):
+    def _calculate_aspect_ratio(self, landmarks, indices, frame_shape):
         coords = np.array([(landmarks[i].x * frame_shape[1], landmarks[i].y * frame_shape[0]) for i in indices])
-        if is_mar:
-            v1 = np.linalg.norm(coords[2] - coords[6])
-            v2 = np.linalg.norm(coords[3] - coords[5])
-            h = np.linalg.norm(coords[0] - coords[4])
-        else:
-            v1 = np.linalg.norm(coords[1] - coords[5])
-            v2 = np.linalg.norm(coords[2] - coords[4])
-            h = np.linalg.norm(coords[0] - coords[3])
+        # Simplified EAR logic for brevity
+        v1 = np.linalg.norm(coords[1] - coords[5])
+        v2 = np.linalg.norm(coords[2] - coords[4])
+        h = np.linalg.norm(coords[0] - coords[3])
         return (v1 + v2) / (2.0 * h + 1e-6)
 
-    def _draw_alert(self, frame, message, play_sound=True):
-        """Draws the visual alert and optionally plays sound."""
-        text_size = cv2.getTextSize(message, cv2.FONT_HERSHEY_TRIPLEX, 1.2, 2)[0]
-        text_x = (frame.shape[1] - text_size[0]) // 2
-        text_y = (frame.shape[0] + text_size[1]) // 2
-        cv2.rectangle(frame, (text_x - 10, text_y - text_size[1] - 10), (text_x + text_size[0] + 10, text_y + 10), (0, 0, 255), -1)
-        cv2.putText(frame, message, (text_x, text_y), cv2.FONT_HERSHEY_TRIPLEX, 1.2, (255, 255, 255), 2)
+    def _get_head_pose(self, landmarks, frame_shape):
+        img_h, img_w, _ = frame_shape
+        face_3d = np.array([[0.0, 0.0, 0.0], [0.0, -330.0, -65.0], [-225.0, 170.0, -135.0], [225.0, 170.0, -135.0], [-150.0, -150.0, -125.0], [150.0, -150.0, -125.0]], dtype=np.float64)
+        face_2d = np.array([(landmarks[1].x * img_w, landmarks[1].y * img_h), (landmarks[152].x * img_w, landmarks[152].y * img_h), (landmarks[263].x * img_w, landmarks[263].y * img_h), (landmarks[33].x * img_w, landmarks[33].y * img_h), (landmarks[288].x * img_w, landmarks[288].y * img_h), (landmarks[58].x * img_w, landmarks[58].y * img_h)], dtype=np.float64)
+        focal_length = 1 * img_w
+        cam_matrix = np.array([[focal_length, 0, img_h / 2], [0, focal_length, img_w / 2], [0, 0, 1]])
+        dist_coeffs = np.zeros((4, 1), dtype=np.float64)
+        success, rot_vec, _ = cv2.solvePnP(face_3d, face_2d, cam_matrix, dist_coeffs)
+        if not success: return None
+        rmat, _ = cv2.Rodrigues(rot_vec)
+        angles, _, _, _, _, _ = cv2.RQDecomp3x3(rmat)
+        return angles
+
+# --- Main Predictor Class ---
+class RealTimePredictor:
+    def __init__(self, model_path='fatigue_lstm.pth'):
+        self.sequence_length = 60
+        self.feature_extractor = FeatureExtractor()
+        self.mp_face_mesh = mp.solutions.face_mesh
+        self.face_mesh = self.mp_face_mesh.FaceMesh(max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.5, min_tracking_confidence=0.5)
         
-        if play_sound and self.alert_sound and not pygame.mixer.get_busy():
-            self.alert_sound.play()
+        # Load the trained model
+        self.model = LSTMModel()
+        self.model.load_state_dict(torch.load(model_path))
+        self.model.eval()  # Set model to evaluation mode
+        
+        self.feature_buffer = deque(maxlen=self.sequence_length)
+        self.class_labels = ['ALERT', 'DROWSY']
 
     def run(self):
-        print("Starting webcam. Press 'q' to quit.")
+        print("Starting real-time ML fatigue detector. Press 'q' to quit.")
         cap = cv2.VideoCapture(0)
 
         while cap.isOpened():
             ret, frame = cap.read()
-            if not ret:
-                break
+            if not ret: break
 
-            frame = cv2.cvtColor(cv2.flip(frame, 1), cv2.COLOR_BGR2RGB)
-            frame.flags.writeable = False
-            results = self.face_mesh.process(frame)
-            frame.flags.writeable = True
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            frame_height, frame_width, _ = frame.shape
+            frame = cv2.flip(frame, 1)
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self.face_mesh.process(frame_rgb)
+            
+            prediction_text = "STATUS: ANALYZING..."
 
-            elapsed_time = time.time() - self.start_time
-            if elapsed_time >= 60:
-                self.start_time = time.time()
-                self.counters['blinks_in_current_minute'] = 0
-                self.counters['yawn_counter'] = 0
-                self.yawn_alert_sound_played = False
-
-            alert_message = None
             if results.multi_face_landmarks:
                 landmarks = results.multi_face_landmarks[0].landmark
                 
-                avg_ear = (self._calculate_aspect_ratio(landmarks, self.landmark_indices['left_eye'], (frame_height, frame_width)) +
-                           self._calculate_aspect_ratio(landmarks, self.landmark_indices['right_eye'], (frame_height, frame_width))) / 2.0
-                
-                mar = self._calculate_aspect_ratio(landmarks, self.landmark_indices['mouth'], (frame_height, frame_width), is_mar=True)
+                # Extract features
+                ear = self.feature_extractor._calculate_aspect_ratio(landmarks, self.feature_extractor.landmark_indices['right_eye'], frame.shape)
+                mar = self.feature_extractor._calculate_aspect_ratio(landmarks, self.feature_extractor.landmark_indices['mouth'], frame.shape)
+                head_angles = self.feature_extractor._get_head_pose(landmarks, frame.shape)
 
-                if avg_ear < self.config['ear_threshold']:
-                    self.counters['eye_closed_frames'] += 1
-                else:
-                    if self.counters['eye_closed_frames'] >= self.config['consecutive_frames']['blink']:
-                        self.counters['blink_counter'] += 1
-                        self.counters['blinks_in_current_minute'] += 1
-                    self.counters['eye_closed_frames'] = 0
-                
-                if mar > self.config['mar_threshold']:
-                    self.counters['yawn_frames'] += 1
-                else:
-                    if self.counters['yawn_frames'] >= self.config['consecutive_frames']['yawn']:
-                        self.counters['yawn_counter'] += 1
-                    self.counters['yawn_frames'] = 0
+                if head_angles is not None:
+                    features = [ear, mar, head_angles[0], head_angles[1], head_angles[2]]
+                    self.feature_buffer.append(features)
 
-                is_alert = False
-                # Priority 1: Drowsiness (Continuous Sound)
-                if self.counters['eye_closed_frames'] > self.config['consecutive_frames']['drowsiness']:
-                    self._draw_alert(frame, "DROWSINESS ALERT!", play_sound=True)
-                    is_alert = True
-                
-                # Priority 2: Excessive Yawning (Sound plays once)
-                elif self.counters['yawn_counter'] >= self.config['yawn_threshold']:
-                    if not self.yawn_alert_sound_played:
-                        self._draw_alert(frame, "EXCESSIVE YAWNING!", play_sound=True)
-                        self.yawn_alert_sound_played = True
-                    else:
-                        self._draw_alert(frame, "EXCESSIVE YAWNING!", play_sound=False)
-                    is_alert = True
+                    # Check if the buffer is full
+                    if len(self.feature_buffer) == self.sequence_length:
+                        # Prepare sequence for the model
+                        sequence_tensor = torch.tensor([list(self.feature_buffer)], dtype=torch.float32)
+                        
+                        # Make a prediction
+                        with torch.no_grad():
+                            output = self.model(sequence_tensor)
+                            _, predicted_idx = torch.max(output, 1)
+                            prediction = self.class_labels[predicted_idx.item()]
+                        
+                        prediction_text = f"STATUS: {prediction}"
+                        
+                        if prediction == 'DROWSY':
+                            # Draw Drowsiness Alert
+                            cv2.putText(frame, "DROWSINESS ALERT", (50, 150), cv2.FONT_HERSHEY_TRIPLEX, 1.2, (0, 0, 255), 2)
 
-                # Priority 3: High Blink Rate (Visual only)
-                else:
-                    current_bpm = (self.counters['blinks_in_current_minute'] / elapsed_time) * 60 if elapsed_time > 1 else 0
-                    if current_bpm > self.config['high_blink_rate_threshold'] and elapsed_time > 10:
-                        self._draw_alert(frame, "High Blink Rate!", play_sound=False)
-                        is_alert = True
-
-                # Stop any playing sound if no alert condition is met
-                if not is_alert and pygame.mixer.get_busy():
-                    pygame.mixer.stop()
-
-                cv2.putText(frame, f"Blinks: {self.counters['blink_counter']}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(frame, f"Yawns (in last min): {self.counters['yawn_counter']}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(frame, f"EAR: {avg_ear:.2f}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(frame, f"MAR: {mar:.2f}", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-            cv2.imshow('Fatigue Detection System', frame)
+            cv2.putText(frame, prediction_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+            cv2.imshow('Real-Time ML Fatigue Detector', frame)
+            
             if cv2.waitKey(5) & 0xFF == ord('q'):
                 break
-        
+
         cap.release()
         cv2.destroyAllWindows()
         self.face_mesh.close()
 
-if __name__ == "__main__":
-    detector = FatigueDetector()
-    detector.run()
+if __name__ == '__main__':
+    predictor = RealTimePredictor()
+    predictor.run()
