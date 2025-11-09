@@ -5,11 +5,8 @@ import numpy as np
 import os
 import glob
 
-# --- You will need the same FeatureExtractor class from real_time_predictor.py ---
-# --- It is copied here for completeness ---
 class FeatureExtractor:
     def __init__(self, config_path="config.json"):
-        # This part is not strictly needed for this script but keeps the class consistent
         pass
 
     def _calculate_aspect_ratio(self, landmarks, indices, frame_shape):
@@ -37,7 +34,6 @@ def process_videos(dataset_path, output_path, sequence_length=60):
     mp_face_mesh = mp.solutions.face_mesh
     face_mesh = mp_face_mesh.FaceMesh(max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
-    # --- IMPORTANT: Adjust these labels based on the actual folder names in the dataset ---
     labels = {"alert": "Vigilant", "drowsy": "DrowsyState"}
 
     for label_class, folder_name in labels.items():
@@ -45,7 +41,6 @@ def process_videos(dataset_path, output_path, sequence_length=60):
         dest_path = os.path.join(output_path, label_class)
         os.makedirs(dest_path, exist_ok=True)
         
-        # Find all video files (e.g., .avi, .mp4) in the directory
         video_files = glob.glob(os.path.join(class_path, '**', '*.avi'), recursive=True)
         print(f"Found {len(video_files)} videos for class '{label_class}'")
 
@@ -90,7 +85,6 @@ def process_videos(dataset_path, output_path, sequence_length=60):
     print("Finished processing all videos.")
 
 if __name__ == '__main__':
-    # --- IMPORTANT: Set the path to where you extracted the UTA-RLDD dataset ---
     dataset_root_path = 'C:/path/to/your/UTA-RLDD'
     output_data_path = 'fatigue_data'
     

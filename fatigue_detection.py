@@ -6,9 +6,7 @@ import torch
 import json
 from collections import deque
 
-# --- Copy the necessary classes here ---
 
-# 1. Copy the LSTMModel class definition from train_lstm.py
 class LSTMModel(torch.nn.Module):
     def __init__(self, input_dim=5, hidden_dim=64, num_layers=2, output_dim=2):
         super(LSTMModel, self).__init__()
@@ -20,8 +18,6 @@ class LSTMModel(torch.nn.Module):
         out = self.fc(hn[-1])
         return out
 
-# 2. Copy the feature extraction part of the FatigueDetectorWithPosePER class
-#    (We only need the methods to calculate features, not the rule-based logic)
 class FeatureExtractor:
     def __init__(self, config_path="config.json"):
         with open(config_path) as f:
@@ -30,7 +26,6 @@ class FeatureExtractor:
 
     def _calculate_aspect_ratio(self, landmarks, indices, frame_shape):
         coords = np.array([(landmarks[i].x * frame_shape[1], landmarks[i].y * frame_shape[0]) for i in indices])
-        # Simplified EAR logic for brevity
         v1 = np.linalg.norm(coords[1] - coords[5])
         v2 = np.linalg.norm(coords[2] - coords[4])
         h = np.linalg.norm(coords[0] - coords[3])
@@ -49,7 +44,6 @@ class FeatureExtractor:
         angles, _, _, _, _, _ = cv2.RQDecomp3x3(rmat)
         return angles
 
-# --- Main Predictor Class ---
 class RealTimePredictor:
     def __init__(self, model_path='fatigue_lstm.pth'):
         self.sequence_length = 60
@@ -57,11 +51,9 @@ class RealTimePredictor:
         self.mp_face_mesh = mp.solutions.face_mesh
         self.face_mesh = self.mp_face_mesh.FaceMesh(max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.5, min_tracking_confidence=0.5)
         
-        # Load the trained model
         self.model = LSTMModel()
         self.model.load_state_dict(torch.load(model_path))
-        self.model.eval()  # Set model to evaluation mode
-        
+        self.model.eval()  
         self.feature_buffer = deque(maxlen=self.sequence_length)
         self.class_labels = ['ALERT', 'DROWSY']
 
